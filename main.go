@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/John-Santa/twitter-golang/awsgo"
+	"github.com/John-Santa/twitter-golang/db"
+	"github.com/John-Santa/twitter-golang/handlers"
 	"github.com/John-Santa/twitter-golang/models"
 	"github.com/John-Santa/twitter-golang/secretmanager"
 	"github.com/aws/aws-lambda-go/events"
@@ -42,7 +44,36 @@ func ExecuteLambda(ctx context.Context, request events.APIGatewayProxyRequest) (
 		}
 		return response, nil
 	}
+	buildContext(ctx, request, secret)
 
+	// Check connection and connect
+	err = db.DBConnect(awsgo.Ctx)
+	if err != nil {
+		response = &events.APIGatewayProxyResponse{
+			StatusCode: 500,
+			Body:       "Error en la conexión a la base de datos: " + err.Error(),
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+		}
+		return response, nil
+	}
+	respAPI := handlers.Handlers(awsgo.Ctx, request)
+	if respAPI.CustomResp == nil {
+		response = &events.APIGatewayProxyResponse{
+			StatusCode: respAPI.Status,
+			Body:       respAPI.Message,
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+		}
+		return response, nil
+	} else {
+		return respAPI.CustomResp, nil
+	}
+}
+
+func buildContext(ctx context.Context, request events.APIGatewayProxyRequest, secret models.Secret) {
 	path := strings.Replace(request.PathParameters["twitter-go-backend"], os.Getenv("UrlPrefix"), "", -1)
 	awsgo.Ctx = context.WithValue(awsgo.Ctx, models.Key("method"), request.HTTPMethod)
 	awsgo.Ctx = context.WithValue(awsgo.Ctx, models.Key("user"), secret.Username)
@@ -53,8 +84,6 @@ func ExecuteLambda(ctx context.Context, request events.APIGatewayProxyRequest) (
 	awsgo.Ctx = context.WithValue(awsgo.Ctx, models.Key("body"), request.Body)
 	awsgo.Ctx = context.WithValue(awsgo.Ctx, models.Key("bucket_name"), os.Getenv("BucketName"))
 	awsgo.Ctx = context.WithValue(awsgo.Ctx, models.Key("path"), path)
-
-	return nil, nil
 }
 
 func ValidateParams() bool {
